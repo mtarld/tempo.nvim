@@ -2,6 +2,7 @@ local M = {}
 
 M.config = {
     log_file = vim.fn.stdpath("data") .. "/tempo_log",
+    prompt_for_name = true,
 }
 
 local timer = {
@@ -9,6 +10,7 @@ local timer = {
     elapsed = 0,
     running = false,
     paused = false,
+    name = "",
 }
 
 function M.setup(opts)
@@ -31,11 +33,12 @@ local function format_time(seconds)
     return string.format("%02d:%02d:%02d", hours, minutes, secs)
 end
 
-local function write_log(start_date, duration)
+local function write_log(start_date, duration, name)
     local file = io.open(M.config.log_file, "a")
 
     if file then
-        file:write(string.format("%s | %s\n", start_date, format_time(duration)))
+        local name_part = name and name ~= "" and " | " .. name or ""
+        file:write(string.format("%s | %s%s\n", start_date, format_time(duration), name_part))
         file:close()
 
         return
@@ -51,13 +54,27 @@ function M.start()
         return
     end
 
-    timer.start_time = os.time()
-    timer.elapsed = 0
-    timer.running = true
-    timer.paused = false
-    timer.log_start_date = os.date("%Y-%m-%d %H:%M:%S")
+    local function start_timer(name)
+        timer.start_time = os.time()
+        timer.elapsed = 0
+        timer.running = true
+        timer.paused = false
+        timer.name = name or ""
+        timer.log_start_date = os.date("%Y-%m-%d %H:%M:%S")
 
-    vim.notify("Timer started", vim.log.levels.INFO)
+        local name_msg = timer.name ~= "" and ' "' .. timer.name .. '"' or ""
+        vim.schedule(function()
+            vim.notify("Timer started" .. name_msg, vim.log.levels.INFO)
+        end)
+    end
+
+    if M.config.prompt_for_name then
+        vim.ui.input({ prompt = "Timer name (optional): " }, function(input)
+            start_timer(input)
+        end)
+    else
+        start_timer("")
+    end
 end
 
 function M.pause()
@@ -88,14 +105,31 @@ function M.stop()
     end
 
     local final_time = get_elapsed_time()
-    write_log(timer.log_start_date, final_time)
 
-    timer.start_time = nil
-    timer.elapsed = 0
-    timer.running = false
-    timer.paused = false
+    local function stop_timer(name)
+        write_log(timer.log_start_date, final_time, name)
 
-    vim.notify("Timer stopped and logged: " .. format_time(final_time), vim.log.levels.INFO)
+        timer.start_time = nil
+        timer.elapsed = 0
+        timer.running = false
+        timer.paused = false
+        timer.name = ""
+
+        vim.schedule(function()
+            vim.notify("Timer stopped and logged: " .. format_time(final_time), vim.log.levels.INFO)
+        end)
+    end
+
+    if M.config.prompt_for_name then
+        vim.ui.input({
+            prompt = "Timer name (optional): ",
+            default = timer.name,
+        }, function(input)
+            stop_timer(input or timer.name)
+        end)
+    else
+        stop_timer(timer.name)
+    end
 end
 
 function M.toggle()
@@ -117,8 +151,9 @@ function M.show()
 
     local current_time = get_elapsed_time()
     local status = timer.paused and " (paused)" or ""
+    local name_part = timer.name ~= "" and ' "' .. timer.name .. '"' or ""
 
-    vim.notify("Timer: " .. format_time(current_time) .. status, vim.log.levels.INFO)
+    vim.notify("Timer: " .. format_time(current_time) .. status .. name_part, vim.log.levels.INFO)
 end
 
 function M.open_log()
